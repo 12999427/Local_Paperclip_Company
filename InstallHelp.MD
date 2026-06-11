@@ -183,7 +183,7 @@ Uso come orchestratore (non ideale):
 
 Questo esempio mostra come creare una company Paperclip strutturata come un team di sviluppo software, con 8 agenti specializzati coordinati da un Tech Lead.
 
-> Il file `software_development_company.zip` allegato contiene il dump esportabile di questa company, importabile con `npx paperclipai company import`.
+> Il file `software_development_company_claudecode_fixed.zip` allegato contiene il dump esportabile di questa company, importabile con `npx paperclipai company import`.
 
 ### Architettura del team
 
@@ -200,7 +200,11 @@ Il principio è avere un **unico punto di contatto** (Tech Lead) a cui dare istr
 | **devops** | CI/CD, deploy, infrastruttura, monitoring |
 | **tech-writer** | Documentazione API, README, changelog |
 
-### Creazione della company via REST API
+### Operazioni comuni operabili da Claude Code (se usato per gestire Paperclip)
+
+Puoi saltare questa sezione se importi il file, è già pronto
+
+#### Creazione della company via REST API
 
 Il comando `company create` non è disponibile nel CLI, quindi si usa il REST API direttamente:
 
@@ -224,7 +228,7 @@ curl -s -X POST http://localhost:3100/api/companies/$COMPANY_ID/agents \
 #      test-engineer, security-reviewer, devops, tech-writer)
 ```
 
-### Assegnare un task al Tech Lead
+#### Assegnare un task al Tech Lead
 
 Una volta creata la struttura, si parla solo col Tech Lead:
 
@@ -240,6 +244,93 @@ curl -s -X POST http://localhost:3100/api/companies/$COMPANY_ID/issues \
     "priority": "high"
   }'
 ```
+
+### Configurare i modelli locali dopo l'import
+
+> **Nota:** a causa di un bug nell'import di Paperclip, quando si importa una company con gli agenti che hanno un adapter come OpenCode e un modello locale, vengono _(o possono venire)_ reimpostati su Claude Code indipendentemente da come erano configurati nel file. Dopo ogni import occorre riassegnare manualmente l'adapter.
+
+L'esempio seguente usa **gemma4:e4b via Ollama**.
+
+> **Importante — context length:** prima di assegnare task agli agenti, assicurati che il context window del modello sia impostato a 64k o più (Ho testato e 64k funziona, altri valori minori potrebbero non funzionare - in particolare se si usa un modello con pochi miliadi di parametri). Un context corto causa `step failed` anche a run "succeeded". Vedi la sezione [**Context length — impostazione critica**](#context-length--impostazione-critica) per Ollama e LM Studio.
+
+#### Prerequisiti
+
+1. Ollama in esecuzione con il modello scaricato:
+   ```bash
+   ollama pull gemma4:e4b
+   ollama serve   # già avviato se l'icona è nella barra menu su macOS
+   ```
+
+2. Se i modelli Ollama non appaiono in OpenCode (vedi sezione dedicata più avanti), crea `~/.config/opencode/config.json` con il modello (la necessità di esplicitare la ricerca di modelli ollama dipende dalla versione di OpenCode):
+   ```json
+   {
+     "$schema": "https://opencode.ai/config.json",
+     "provider": {
+       "ollama": {
+         "npm": "@ai-sdk/openai-compatible",
+         "name": "Ollama (local)",
+         "options": { "baseURL": "http://127.0.0.1:11434/v1" },
+         "models": {
+           "gemma4:e4b": { "name": "Gemma 4 E4B" }
+         }
+       }
+     }
+   }
+   ```
+
+#### Via UI (per ogni agente)
+
+1. Apri Paperclip → Company → agente → **Settings**
+2. Sezione **Adapter** → seleziona **OpenCode**
+3. Nel selettore **Model**, scegli il modello sotto la voce `ollama` (es. `ollama / Gemma 4 E4B`)
+4. Se è presente un **modello secondario** (fallback), disabilitalo o lascialo vuoto — il modello di default potrebbe non essere disponibile e causare errori silenziosi
+5. Salva e ripeti per tutti e 8 gli agenti
+
+#### Via REST API (tutti gli agenti in una volta)
+
+Prima recupera gli ID degli agenti:
+
+```bash
+COMPANY_ID="<id-della-company>"
+
+curl -s http://localhost:3100/api/companies/$COMPANY_ID/agents \
+  | python3 -c "
+import sys, json
+agents = json.load(sys.stdin)
+for a in agents:
+    print(a['id'], a['name'])
+"
+```
+
+Poi aggiorna ogni agente con un singolo comando (sostituisci `<AGENT_ID>`):
+
+```bash
+curl -s -X PATCH http://localhost:3100/api/companies/$COMPANY_ID/agents/<AGENT_ID> \
+  -H "Content-Type: application/json" \
+  -d '{"adapterType":"opencode_local","adapterConfig":{"model":"ollama/gemma4:e4b"}}'
+```
+
+Oppure aggiornali tutti in un loop:
+
+```bash
+COMPANY_ID="<id-della-company>"
+
+# Recupera tutti gli ID in un array
+AGENT_IDS=$(curl -s http://localhost:3100/api/companies/$COMPANY_ID/agents \
+  | python3 -c "import sys,json; [print(a['id']) for a in json.load(sys.stdin)]")
+
+# Aggiorna tutti in sequenza
+for ID in $AGENT_IDS; do
+  curl -s -X PATCH http://localhost:3100/api/companies/$COMPANY_ID/agents/$ID \
+    -H "Content-Type: application/json" \
+    -d '{"adapterType":"opencode_local","adapterConfig":{"model":"ollama/gemma4:e4b"}}' \
+    | python3 -c "import sys,json; a=json.load(sys.stdin); print(a.get('name'), '→', a.get('adapterType'))"
+done
+```
+
+Per usare un modello diverso (es. LM Studio), sostituisci `ollama/gemma4:e4b` con `lmstudio/<model-id>` e assicurati che la sezione `lmstudio` sia presente nel `config.json` di OpenCode (vedi sezione LM Studio più avanti).
+
+---
 
 ### Perché questo approccio funziona
 
@@ -287,7 +378,7 @@ ollama pull qwen2.5-coder:72b
 
 Gli agenti Paperclip non sono vincolati a Claude. Puoi farli girare su modelli locali tramite **Ollama** o **LM Studio**, usando **OpenCode** come adapter. Questa sezione descrive come configurare entrambi.
 
-__Il progetto con gli agenti impostati con OpenCode, nonostante tutte le procedure siano spiegate a seguito, è disponibile qui: software_development_company_local.zip__
+__Il progetto con gli agenti impostati con OpenCode, nonostante tutte le procedure siano spiegate a seguito, è disponibile qui: software_development_company_claudecode_fixed_local.zip__
 
 ---
 
@@ -316,6 +407,31 @@ ollama pull qwen3.5           # ottimo per coding
 ollama run llama3.2 "ciao"
 ```
 
+#### Context length — impostazione critica
+
+Paperclip invia agli agenti un system prompt molto lungo (istruzioni del protocollo, stato della company, contesto dell'issue, ecc.). Se il context window del modello è troppo corto, il prompt arriva troncato e il modello non capisce cosa fare — restituisce `step failed` o risposte vuote pur riportando il run come "succeeded".
+
+**Imposta il context length a 64k o più** nell'app Ollama:
+
+1. Apri l'app Ollama (icona nella barra menu) → **Settings**
+2. Cerca il campo **Context Length** (o `num_ctx`) e impostalo a `65536` (64k)
+3. Riavvia Ollama
+
+In alternativa, puoi impostarlo per singolo modello creando un Modelfile:
+
+```bash
+# Crea un Modelfile che estende un modello esistente con context 64k
+cat > /tmp/Modelfile <<'EOF'
+FROM gemma4:e4b
+PARAMETER num_ctx 65536
+EOF
+ollama create gemma4-e4b-64k -f /tmp/Modelfile
+```
+
+Un context da 4k (default di alcuni modelli) causa `step failed`. Con 64k gli agenti Paperclip funzionano correttamente.
+
+**In LM Studio** il context length si imposta per ogni modello al momento del caricamento: nella scheda **Developer → Local Server**, quando clicchi **Load model**, a destra del nome del modello c'è una **freccia (▶)** — cliccandola si apre un pannello dove puoi specificare la dimensione della context window prima di avviare il server.
+
 #### Endpoint Ollama
 
 Ollama espone un server OpenAI-compatible su:
@@ -334,7 +450,27 @@ curl http://127.0.0.1:11434/v1/models
 
 1. Modifica l'agente → `adapterType: opencode_local`
 2. Seleziona il modello dal dropdown (es. `ollama/llama3.2`)
-3. **Nessuna configurazione aggiuntiva richiesta** — OpenCode scopre Ollama automaticamente sulla porta 11434
+
+In alcune versioni di OpenCode, Ollama viene scoperto automaticamente senza nessuna configurazione. Se però aprendo OpenCode i modelli Ollama non appaiono nel selettore (Ctrl+P → "Change model"), occorre dichiararli esplicitamente in `~/.config/opencode/config.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "ollama": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Ollama (local)",
+      "options": { "baseURL": "http://127.0.0.1:11434/v1" },
+      "models": {
+        "llama3.2:3b": { "name": "Llama 3.2 3B" },
+        "qwen2.5-coder:14b": { "name": "Qwen 2.5 Coder 14B" }
+      }
+    }
+  }
+}
+```
+
+Sostituisci i modelli con quelli restituiti da `curl http://127.0.0.1:11434/v1/models`.
 
 #### Testare i modelli in OpenCode
 
@@ -343,7 +479,7 @@ Per verificare quali modelli OpenCode vede prima di assegnarli a un agente:
 ```bash
 opencode
 # poi: Ctrl+P → "Change model"
-# apparirà la lista di tutti i modelli scoperti
+# apparirà la lista di tutti i modelli disponibili
 ```
 
 ---

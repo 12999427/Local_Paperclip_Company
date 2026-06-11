@@ -183,7 +183,7 @@ Use as orchestrator (not ideal):
 
 This example shows how to create a Paperclip company structured as a software development team, with 8 specialised agents coordinated by a Tech Lead.
 
-> The attached `software_development_company.zip` file contains the exportable dump of this company, importable with `npx paperclipai company import`.
+> The attached `software_development_company_claudecode_fixed.zip` file contains the exportable dump of this company, importable with `npx paperclipai company import`.
 
 ### Team architecture
 
@@ -243,6 +243,93 @@ curl -s -X POST http://localhost:3100/api/companies/$COMPANY_ID/issues \
 
 > **Note:** use `assigneeAgentId` (not `assigneeId`) when assigning to an agent. `assigneeId` is for human users and will leave the issue unassigned — agents will not pick it up.
 
+### Configuring local models after import
+
+> **Note:** due to a bug in Paperclip's import process, when importing a company whose agents were configured with an adapter such as OpenCode and a local model, they may be reset to Claude Code regardless of how they were configured in the file. After every import you need to reassign the adapter manually.
+
+The following example uses **gemma4:e4b via Ollama**.
+
+> **Important — context length:** before assigning tasks to agents, make sure the model's context window is set to 64k or more (tested: 64k works; smaller values may not — especially with models that have fewer billion parameters). A short context causes `step failed` even on runs reported as "succeeded". See the [**Context length — critical setting**](#context-length--critical-setting) section for both Ollama and LM Studio.
+
+#### Prerequisites
+
+1. Ollama running with the model downloaded:
+   ```bash
+   ollama pull gemma4:e4b
+   ollama serve   # already running if the icon is in the menu bar on macOS
+   ```
+
+2. If Ollama models do not appear in OpenCode (see the dedicated section below), create `~/.config/opencode/config.json` with the model (whether Ollama needs to be declared explicitly depends on the OpenCode version):
+   ```json
+   {
+     "$schema": "https://opencode.ai/config.json",
+     "provider": {
+       "ollama": {
+         "npm": "@ai-sdk/openai-compatible",
+         "name": "Ollama (local)",
+         "options": { "baseURL": "http://127.0.0.1:11434/v1" },
+         "models": {
+           "gemma4:e4b": { "name": "Gemma 4 E4B" }
+         }
+       }
+     }
+   }
+   ```
+
+#### Via UI (for each agent)
+
+1. Open Paperclip → Company → agent → **Settings**
+2. **Adapter** section → select **OpenCode**
+3. In the **Model** selector, choose the model listed under `ollama` (e.g. `ollama / Gemma 4 E4B`)
+4. If a **secondary model** (fallback) is present, disable it or leave it empty — the default model may not be available and can cause silent errors
+5. Save and repeat for all 8 agents
+
+#### Via REST API (all agents at once)
+
+First retrieve the agent IDs:
+
+```bash
+COMPANY_ID="<company-id>"
+
+curl -s http://localhost:3100/api/companies/$COMPANY_ID/agents \
+  | python3 -c "
+import sys, json
+agents = json.load(sys.stdin)
+for a in agents:
+    print(a['id'], a['name'])
+"
+```
+
+Then update a single agent (replace `<AGENT_ID>`):
+
+```bash
+curl -s -X PATCH http://localhost:3100/api/companies/$COMPANY_ID/agents/<AGENT_ID> \
+  -H "Content-Type: application/json" \
+  -d '{"adapterType":"opencode_local","adapterConfig":{"model":"ollama/gemma4:e4b"}}'
+```
+
+Or update all of them in a loop:
+
+```bash
+COMPANY_ID="<company-id>"
+
+# Retrieve all IDs
+AGENT_IDS=$(curl -s http://localhost:3100/api/companies/$COMPANY_ID/agents \
+  | python3 -c "import sys,json; [print(a['id']) for a in json.load(sys.stdin)]")
+
+# Update all sequentially
+for ID in $AGENT_IDS; do
+  curl -s -X PATCH http://localhost:3100/api/companies/$COMPANY_ID/agents/$ID \
+    -H "Content-Type: application/json" \
+    -d '{"adapterType":"opencode_local","adapterConfig":{"model":"ollama/gemma4:e4b"}}' \
+    | python3 -c "import sys,json; a=json.load(sys.stdin); print(a.get('name'), '→', a.get('adapterType'))"
+done
+```
+
+To use a different model (e.g. LM Studio), replace `ollama/gemma4:e4b` with `lmstudio/<model-id>` and make sure the `lmstudio` section is present in OpenCode's `config.json` (see the LM Studio section below).
+
+---
+
 ### Why this approach works
 
 **Real parallelism:** while the Backend Developer writes the Flask APIs, the Frontend Developer works on the interface and the Test Engineer prepares the tests. No one waits.
@@ -289,7 +376,7 @@ ollama pull qwen2.5-coder:72b
 
 Paperclip agents are not tied to Claude. You can run them on local models via **Ollama** or **LM Studio**, using **OpenCode** as the adapter. This section describes how to configure both.
 
-The project with agents configured with OpenCode, even though all procedures are explained below, is available here: `software_development_company_local.zip`
+The project with agents configured with OpenCode is available here: `software_development_company_claudecode_fixed_local.zip`
 
 ---
 
@@ -318,6 +405,31 @@ ollama pull qwen3.5           # excellent for coding
 ollama run llama3.2 "hello"
 ```
 
+#### Context length — critical setting
+
+Paperclip sends agents a very long system prompt (protocol instructions, company state, issue context, etc.). If the model's context window is too short, the prompt arrives truncated and the model does not understand what to do — it returns `step failed` or empty responses even though the run is reported as "succeeded".
+
+**Set the context length to 64k or more** in the Ollama app:
+
+1. Open the Ollama app (menu bar icon) → **Settings**
+2. Find the **Context Length** field (or `num_ctx`) and set it to `65536` (64k)
+3. Restart Ollama
+
+Alternatively, set it per model by creating a Modelfile:
+
+```bash
+# Create a Modelfile extending an existing model with 64k context
+cat > /tmp/Modelfile <<'EOF'
+FROM gemma4:e4b
+PARAMETER num_ctx 65536
+EOF
+ollama create gemma4-e4b-64k -f /tmp/Modelfile
+```
+
+A 4k context (default for some models) causes `step failed`. With 64k, Paperclip agents work correctly.
+
+**In LM Studio** the context length is set per model at load time: in the **Developer → Local Server** tab, when you click **Load model**, there is an **arrow (▶)** to the right of the model name — clicking it opens a panel where you can specify the context window size before starting the server.
+
 #### Ollama endpoint
 
 Ollama exposes an OpenAI-compatible server at:
@@ -336,7 +448,27 @@ curl http://127.0.0.1:11434/v1/models
 
 1. Edit the agent → `adapterType: opencode_local`
 2. Select the model from the dropdown (e.g. `ollama/llama3.2`)
-3. **No additional configuration required** — OpenCode discovers Ollama automatically on port 11434
+
+In some versions of OpenCode, Ollama is discovered automatically with no configuration. However, if Ollama models do not appear in the model selector (Ctrl+P → "Change model"), you need to declare them explicitly in `~/.config/opencode/config.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "ollama": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Ollama (local)",
+      "options": { "baseURL": "http://127.0.0.1:11434/v1" },
+      "models": {
+        "llama3.2:3b": { "name": "Llama 3.2 3B" },
+        "qwen2.5-coder:14b": { "name": "Qwen 2.5 Coder 14B" }
+      }
+    }
+  }
+}
+```
+
+Replace the models with those returned by `curl http://127.0.0.1:11434/v1/models`.
 
 #### Testing models in OpenCode
 
@@ -345,7 +477,7 @@ To verify which models OpenCode sees before assigning them to an agent:
 ```bash
 opencode
 # then: Ctrl+P → "Change model"
-# the list of all discovered models will appear
+# the list of all available models will appear
 ```
 
 ---
