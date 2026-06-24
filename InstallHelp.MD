@@ -548,6 +548,117 @@ Servono invece in questi casi:
 
 ---
 
+### Zhipu AI — GLM 5.2 (modello cloud)
+
+OpenCode supporta qualsiasi provider con API OpenAI-compatibile, incluso **Zhipu AI** (bigmodel.cn). Questo permette di usare i modelli GLM direttamente da cloud, senza hardware locale.
+
+> **Prerequisiti:** account su [open.bigmodel.cn](https://open.bigmodel.cn) con una API key generata. Per la procedura di registrazione e generazione chiave, vedi la sezione [Creare un account Zhipu AI e ottenere la API key](#creare-un-account-zhipu-ai-e-ottenere-la-api-key) più avanti.
+
+#### 1. Configurare OpenCode per Zhipu AI
+
+Apri (o crea) `~/.config/opencode/config.json` e aggiungi il provider `zhipuai` nella sezione `provider`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "zhipuai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Zhipu AI (cloud)",
+      "options": {
+        "baseURL": "https://open.bigmodel.cn/api/paas/v4/",
+        "apiKey": "TUA_API_KEY_QUI"
+      },
+      "models": {
+        "glm-4-flash": { "name": "GLM 5.2" }
+      }
+    }
+  }
+}
+```
+
+> **Nota sul model ID:** la chiave dentro `models` (es. `glm-4-flash`) deve corrispondere all'**identificatore API esatto** del modello — verificalo nella console di bigmodel.cn sotto **Modelli disponibili** o **API → Documentazione**. Il valore di `name` è solo un'etichetta locale che comparirà in OpenCode. Per GLM 5.2, l'ID API potrebbe essere qualcosa come `glm-5.2`, `glm-5-flash` o simile — controlla sempre nella console.
+
+Se hai già altri provider nel file (es. Ollama), aggiungi `zhipuai` dentro la stessa sezione `provider` affiancandolo agli altri:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "ollama": { ... },
+    "zhipuai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Zhipu AI (cloud)",
+      "options": {
+        "baseURL": "https://open.bigmodel.cn/api/paas/v4/",
+        "apiKey": "TUA_API_KEY_QUI"
+      },
+      "models": {
+        "glm-4-flash": { "name": "GLM 5.2" }
+      }
+    }
+  }
+}
+```
+
+Dopo aver salvato, verifica che OpenCode veda il nuovo modello:
+
+```bash
+opencode
+# Ctrl+P → "Change model" — deve comparire "Zhipu AI (cloud) / GLM 5.2"
+```
+
+#### 2. Configurare gli agenti Paperclip per usare GLM 5.2
+
+> Esempio pratico: importa `software_development_company_claudecode_fixed.zip` e dopo l'import configura gli agenti su GLM 5.2 tramite REST API, senza modificare il file ZIP.
+
+**Via UI (per ogni agente):**
+
+1. Apri Paperclip → Company → agente → **Settings**
+2. Sezione **Adapter** → seleziona **OpenCode**
+3. Nel selettore **Model**, scegli il modello sotto la voce `zhipuai` (es. `zhipuai / GLM 5.2`)
+4. Se compare un **modello secondario** (fallback), disabilitalo o lascialo vuoto
+5. Salva e ripeti per tutti gli agenti
+
+**Via REST API (tutti gli agenti in una volta):**
+
+```bash
+COMPANY_ID="<id-della-company>"
+MODEL="zhipuai/glm-4-flash"   # sostituisci con l'ID API esatto del tuo modello
+
+# Recupera tutti gli ID degli agenti
+AGENT_IDS=$(curl -s http://localhost:3100/api/companies/$COMPANY_ID/agents \
+  | python3 -c "import sys,json; [print(a['id']) for a in json.load(sys.stdin)]")
+
+# Aggiorna tutti gli agenti
+for ID in $AGENT_IDS; do
+  curl -s -X PATCH http://localhost:3100/api/companies/$COMPANY_ID/agents/$ID \
+    -H "Content-Type: application/json" \
+    -d "{\"adapterType\":\"opencode_local\",\"adapterConfig\":{\"model\":\"$MODEL\"}}" \
+    | python3 -c "import sys,json; a=json.load(sys.stdin); print(a.get('name'), '→', a.get('adapterType'), a.get('adapterConfig',{}).get('model',''))"
+done
+```
+
+#### Context length
+
+I modelli cloud Zhipu AI supportano context window da 128k per default — non è necessaria nessuna configurazione aggiuntiva. Il problema `step failed` per context corto riguarda solo i modelli locali (Ollama/LM Studio con default a 4k). Vedi la sezione [Context length — impostazione critica](#context-length--impostazione-critica) per i dettagli sui modelli locali.
+
+---
+
+### Creare un account Zhipu AI e ottenere la API key
+
+1. Vai su [open.bigmodel.cn](https://open.bigmodel.cn) e clicca **注册 / Register**
+2. Registrati con email o numero di telefono (è disponibile anche il login con account Google)
+3. Una volta dentro la console, vai su **API Keys** (menu laterale sinistro)
+4. Clicca **+ Crea API Key**, dai un nome e copia la chiave generata — non verrà mostrata di nuovo
+5. Incolla la chiave nel campo `apiKey` del `config.json` di OpenCode come indicato sopra
+
+> **Free tier:** Zhipu AI offre un credito gratuito alla registrazione, sufficiente per test e sviluppo. Controlla la dashboard per i limiti del tuo account.
+
+> **Sicurezza:** non committare mai la API key nel codice o in file versionati. Tienila solo in `~/.config/opencode/config.json` che è fuori dal repository.
+
+---
+
 ### Quale modello scegliere
 
 | Modello | Parametri | Adatto per |
