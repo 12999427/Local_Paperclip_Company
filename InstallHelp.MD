@@ -548,67 +548,81 @@ Servono invece in questi casi:
 
 ---
 
-### Zhipu AI — GLM 5.2 (modello cloud)
+### OpenRouter — GLM 5.2 (modello cloud)
 
-OpenCode supporta qualsiasi provider con API OpenAI-compatibile, incluso **Zhipu AI** (bigmodel.cn). Questo permette di usare i modelli GLM direttamente da cloud, senza hardware locale.
+**OpenRouter** è un gateway cloud che aggrega centinaia di modelli AI (inclusi quelli di Zhipu AI come GLM) tramite un'unica API OpenAI-compatibile. Permette di usare GLM da cloud senza registrarsi direttamente su bigmodel.cn.
 
-> **Prerequisiti:** account su [open.bigmodel.cn](https://open.bigmodel.cn) con una API key generata. Per la procedura di registrazione e generazione chiave, vedi la sezione [Creare un account Zhipu AI e ottenere la API key](#creare-un-account-zhipu-ai-e-ottenere-la-api-key) più avanti.
+> **Prerequisiti:** account su [openrouter.ai](https://openrouter.ai) con una API key generata. Per la procedura, vedi la sezione [Creare un account OpenRouter e ottenere la API key](#creare-un-account-openrouter-e-ottenere-la-api-key) più avanti.
 
-#### 1. Configurare OpenCode per Zhipu AI
+#### 1. Trovare l'ID del modello GLM su OpenRouter
 
-Apri (o crea) `~/.config/opencode/config.json` e aggiungi il provider `zhipuai` nella sezione `provider`:
+I modelli GLM su OpenRouter sono pubblicati dal provider **Z.ai** (non "zhipuai"). Il model ID di GLM 5.2 è:
+
+```
+z-ai/glm-5.2
+```
+
+Verificalo sulla pagina [openrouter.ai/z-ai/glm-5.2](https://openrouter.ai/z-ai/glm-5.2).
+
+> **GLM 5.2 è un modello a pagamento** ($0.95/M token input, $3/M token output). Per usarlo occorre aggiungere crediti su OpenRouter (carta di credito necessaria). OpenRouter assegna un piccolo credito gratuito alla registrazione, sufficiente per qualche test iniziale.
+>
+> **Alternativa gratuita:** se vuoi verificare che l'integrazione funzioni prima di aggiungere la carta, usa `z-ai/glm-4.5-air:free` — è completamente gratuita e non richiede crediti. Una volta confermato che tutto gira, sostituisci il model ID con `z-ai/glm-5.2`.
+
+#### 2. Configurare OpenCode per OpenRouter
+
+Apri (o crea) `~/.config/opencode/config.json` e aggiungi il provider `openrouter` nella sezione `provider`:
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
   "provider": {
-    "zhipuai": {
+    "openrouter": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "Zhipu AI (cloud)",
+      "name": "OpenRouter",
       "options": {
-        "baseURL": "https://open.bigmodel.cn/api/paas/v4/",
+        "baseURL": "https://openrouter.ai/api/v1",
         "apiKey": "TUA_API_KEY_QUI"
       },
       "models": {
-        "glm-4-flash": { "name": "GLM 5.2" }
+        "z-ai/glm-5.2": { "name": "GLM 5.2" }
       }
     }
   }
 }
 ```
 
-> **Nota sul model ID:** la chiave dentro `models` (es. `glm-4-flash`) deve corrispondere all'**identificatore API esatto** del modello — verificalo nella console di bigmodel.cn sotto **Modelli disponibili** o **API → Documentazione**. Il valore di `name` è solo un'etichetta locale che comparirà in OpenCode. Per GLM 5.2, l'ID API potrebbe essere qualcosa come `glm-5.2`, `glm-5-flash` o simile — controlla sempre nella console.
-
-Se hai già altri provider nel file (es. Ollama), aggiungi `zhipuai` dentro la stessa sezione `provider` affiancandolo agli altri:
+Se hai già altri provider nel file (es. Ollama), aggiungi `openrouter` affiancandolo agli altri:
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
   "provider": {
     "ollama": { ... },
-    "zhipuai": {
+    "openrouter": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "Zhipu AI (cloud)",
+      "name": "OpenRouter",
       "options": {
-        "baseURL": "https://open.bigmodel.cn/api/paas/v4/",
+        "baseURL": "https://openrouter.ai/api/v1",
         "apiKey": "TUA_API_KEY_QUI"
       },
       "models": {
-        "glm-4-flash": { "name": "GLM 5.2" }
+        "z-ai/glm-5.2": { "name": "GLM 5.2" }
       }
     }
   }
 }
 ```
 
+> Per usare la versione gratuita invece, sostituisci `z-ai/glm-5.2` con `z-ai/glm-4.5-air:free` in entrambi i blocchi `models`.
+
 Dopo aver salvato, verifica che OpenCode veda il nuovo modello:
 
 ```bash
 opencode
-# Ctrl+P → "Change model" — deve comparire "Zhipu AI (cloud) / GLM 5.2"
+# Ctrl+P → "Change model" — deve comparire "OpenRouter / GLM 5.2"
 ```
 
-#### 2. Configurare gli agenti Paperclip per usare GLM 5.2
+#### 3. Configurare gli agenti Paperclip per usare GLM 5.2
 
 > Esempio pratico: importa `software_development_company_claudecode_fixed.zip` e dopo l'import configura gli agenti su GLM 5.2 tramite REST API, senza modificare il file ZIP.
 
@@ -616,7 +630,7 @@ opencode
 
 1. Apri Paperclip → Company → agente → **Settings**
 2. Sezione **Adapter** → seleziona **OpenCode**
-3. Nel selettore **Model**, scegli il modello sotto la voce `zhipuai` (es. `zhipuai / GLM 5.2`)
+3. Nel selettore **Model**, scegli il modello sotto la voce `openrouter` (es. `openrouter / GLM 5.2`)
 4. Se compare un **modello secondario** (fallback), disabilitalo o lascialo vuoto
 5. Salva e ripeti per tutti gli agenti
 
@@ -624,7 +638,7 @@ opencode
 
 ```bash
 COMPANY_ID="<id-della-company>"
-MODEL="zhipuai/glm-4-flash"   # sostituisci con l'ID API esatto del tuo modello
+MODEL="openrouter/z-ai/glm-5.2"   # oppure "openrouter/z-ai/glm-4.5-air:free" per la versione gratuita
 
 # Recupera tutti gli ID degli agenti
 AGENT_IDS=$(curl -s http://localhost:3100/api/companies/$COMPANY_ID/agents \
@@ -641,19 +655,18 @@ done
 
 #### Context length
 
-I modelli cloud Zhipu AI supportano context window da 128k per default — non è necessaria nessuna configurazione aggiuntiva. Il problema `step failed` per context corto riguarda solo i modelli locali (Ollama/LM Studio con default a 4k). Vedi la sezione [Context length — impostazione critica](#context-length--impostazione-critica) per i dettagli sui modelli locali.
+I modelli cloud via OpenRouter supportano context window da 128k o più per default — non è necessaria nessuna configurazione aggiuntiva. Il problema `step failed` per context corto riguarda solo i modelli locali (Ollama/LM Studio con default a 4k).
 
 ---
 
-### Creare un account Zhipu AI e ottenere la API key
+### Creare un account OpenRouter e ottenere la API key
 
-1. Vai su [open.bigmodel.cn](https://open.bigmodel.cn) e clicca **注册 / Register**
-2. Registrati con email o numero di telefono (è disponibile anche il login con account Google)
-3. Una volta dentro la console, vai su **API Keys** (menu laterale sinistro)
-4. Clicca **+ Crea API Key**, dai un nome e copia la chiave generata — non verrà mostrata di nuovo
-5. Incolla la chiave nel campo `apiKey` del `config.json` di OpenCode come indicato sopra
+1. Vai su [openrouter.ai](https://openrouter.ai) e clicca **Sign In** → registrati con Google o email
+2. Una volta dentro, vai su **Keys** (menu in alto a destra o sidebar)
+3. Clicca **Create Key**, dai un nome e copia la chiave generata — non verrà mostrata di nuovo
+4. Incolla la chiave nel campo `apiKey` del `config.json` di OpenCode come indicato sopra
 
-> **Free tier:** Zhipu AI offre un credito gratuito alla registrazione, sufficiente per test e sviluppo. Controlla la dashboard per i limiti del tuo account.
+> **Carta di credito:** non è obbligatoria per usare i modelli **gratuiti** (contrassegnati con `:free` o badge Free su openrouter.ai/models). Per i modelli a pagamento occorre aggiungere crediti (minimo $5). Verifica sempre il badge del modello prima di usarlo.
 
 > **Sicurezza:** non committare mai la API key nel codice o in file versionati. Tienila solo in `~/.config/opencode/config.json` che è fuori dal repository.
 
